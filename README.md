@@ -19,6 +19,8 @@ It patches your local launcher install in place, keeps a backup of the original 
 
 Everything else in the launcher works as normal. Each group can be turned off individually in `config.json`.
 
+It can also optionally [block the launcher from updating itself](#blocking-launcher-updates), so the patches aren't undone by the next update.
+
 ## How it works
 
 The launcher is an Electron app. Its UI and logic live in `resources\app.asar`.
@@ -53,19 +55,46 @@ If the build fails at the linking step with `'vswhere.exe' is not recognized`, a
 
 ## Usage
 
-Run `NoMoreLunarPlus.exe` as administrator. It will find your install, close Lunar Client, patch it and show the result of every patch.
+Run `NoMoreLunarPlus.exe` as administrator. It finds your install, shows its current state and opens a menu:
 
-If the install is already patched, it asks whether you want to re-apply the patches, restore the stock launcher, or quit.
+```
+  Install   C:\Users\you\AppData\Local\Programs\Lunar Client
+  Version   3.7.21.0
+  Ads       Stock
+  Updates   Allowed
 
-Command line options:
+  What do you want to do?
+    [1] Remove ads and upsells
+    [2] Block launcher updates
+    [3] Dry run (show which patches match)
+    [Q] Quit
+```
+
+Every action closes Lunar Client first, then shows the result of each patch. The two options are independent, so you can remove ads, block updates, or both.
+
+### Blocking launcher updates
+
+This is optional and off by default. It stops the launcher from updating itself, so your patches stay in place. Game versions, mods, assets and everything else inside the launcher still update normally.
+
+When you want to update Lunar Client, choose **Allow launcher updates**, let it update, then run the tool again.
+
+Keep in mind that a very old launcher may eventually stop working if Lunar Client's services require a newer version.
+
+### Command line options
+
+Passing any action skips the menu, which is useful for scripts.
 
 | Option | Description |
 | --- | --- |
-| `--patch` | Patch without prompting (re-applies if already patched) |
+| `--patch` | Remove ads and upsells (re-applies if already patched) |
+| `--block-updates` | Block launcher self-updates |
+| `--allow-updates` | Allow launcher self-updates again |
 | `--restore` | Restore the stock launcher from the backup |
 | `--check` | Dry run: show which patches match, change nothing |
 | `--path <folder>` | Use a specific Lunar Client install folder |
 | `--no-pause` | Don't wait for a key press before exiting |
+
+`--patch` can be combined with `--block-updates` or `--allow-updates`.
 
 ### config.json
 
@@ -91,11 +120,11 @@ Created next to the executable on first run.
 
 ### After a Lunar Client update
 
-Launcher updates replace the patched files. Run the tool again after updating.
+Launcher updates replace the patched files. Run the tool again after updating, or block launcher updates to avoid this.
 
 ### Restoring
 
-Run `NoMoreLunarPlus.exe --restore`, or run it normally and choose restore. Reinstalling Lunar Client also restores it completely.
+Run `NoMoreLunarPlus.exe --restore`, or choose **Restore stock launcher** from the menu. Reinstalling Lunar Client also restores it completely.
 
 ## Known side effects
 

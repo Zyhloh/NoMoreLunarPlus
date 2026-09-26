@@ -1,19 +1,24 @@
 namespace NoMoreLunarPlus.Cli;
 
-internal enum PatcherAction
+internal sealed record Options(
+    bool Patch,
+    bool? BlockUpdates,
+    bool Restore,
+    bool Check,
+    string? InstallPath,
+    bool NoPause)
 {
-    Patch,
-    Restore,
-    Check
-}
+    public const string Usage =
+        "Usage: NoMoreLunarPlus [--patch] [--block-updates | --allow-updates] [--restore] [--check] [--path <folder>] [--no-pause]";
 
-internal sealed record Options(PatcherAction? Action, string? InstallPath, bool NoPause)
-{
-    public const string Usage = "Usage: NoMoreLunarPlus [--patch | --restore | --check] [--path <folder>] [--no-pause]";
+    public bool HasAction => Patch || BlockUpdates.HasValue || Restore || Check;
 
     public static Options Parse(string[] args)
     {
-        PatcherAction? action = null;
+        var patch = false;
+        bool? blockUpdates = null;
+        var restore = false;
+        var check = false;
         string? installPath = null;
         var noPause = false;
 
@@ -22,13 +27,19 @@ internal sealed record Options(PatcherAction? Action, string? InstallPath, bool 
             switch (args[i].ToLowerInvariant())
             {
                 case "--patch":
-                    action = PatcherAction.Patch;
+                    patch = true;
+                    break;
+                case "--block-updates":
+                    blockUpdates = true;
+                    break;
+                case "--allow-updates":
+                    blockUpdates = false;
                     break;
                 case "--restore":
-                    action = PatcherAction.Restore;
+                    restore = true;
                     break;
                 case "--check":
-                    action = PatcherAction.Check;
+                    check = true;
                     break;
                 case "--no-pause":
                     noPause = true;
@@ -41,6 +52,11 @@ internal sealed record Options(PatcherAction? Action, string? InstallPath, bool 
             }
         }
 
-        return new Options(action, installPath, noPause);
+        if ((restore || check) && (patch || blockUpdates.HasValue) || restore && check)
+        {
+            throw new PatcherException($"--restore and --check can't be combined with other actions. {Usage}");
+        }
+
+        return new Options(patch, blockUpdates, restore, check, installPath, noPause);
     }
 }

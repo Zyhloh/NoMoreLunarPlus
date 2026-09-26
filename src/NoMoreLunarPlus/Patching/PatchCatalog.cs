@@ -5,7 +5,16 @@ internal static class PatchCatalog
     private const string PromoFilter =
         """(l=>Array.isArray(l)?l.filter(i=>!/store\.lunarclient\.com|lunarclient\.com\/store|moonsworth\.store|Lunar\+|Lunar Plus/.test(JSON.stringify(i))):l)""";
 
-    public static IReadOnlyList<PatchDefinition> All { get; } =
+    public const string BlockUpdatesId = "block-updates";
+
+    public static PatchDefinition BlockUpdates { get; } =
+        new(BlockUpdatesId, "Launcher self-updates", Features.Updates, PatchScope.Main,
+            """let (?<result>[\w$]+)=await (?<updater>[\w$]+)\.autoUpdater\.checkForUpdates\(\);""",
+            "let ${result}=(${updater}.autoUpdater.emit(`update-not-available`),null);");
+
+    public static IReadOnlyList<PatchDefinition> All => [.. Removals, BlockUpdates];
+
+    public static IReadOnlyList<PatchDefinition> Removals { get; } =
     [
         new("ad-placements", "Ad placements", Features.Ads, PatchScope.Any,
             """(?<![\w$])(?<state>[\w$]+)\.ads=[\w$]+\.payload\.ads(?![\w$])""",

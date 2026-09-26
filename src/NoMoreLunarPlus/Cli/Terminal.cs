@@ -17,13 +17,18 @@ internal static class Terminal
         Write($"  {AppInfo.Name}", ConsoleColor.Magenta);
         WriteLine($"  v{AppInfo.Version}", ConsoleColor.DarkGray);
         WriteLine("  " + new string('─', 52), ConsoleColor.DarkGray);
-        Console.WriteLine();
     }
 
     public static void Field(string label, string value, ConsoleColor color = ConsoleColor.White)
     {
         Write($"  {label.PadRight(LabelWidth)}", ConsoleColor.DarkGray);
         WriteLine(value, color);
+    }
+
+    public static void Rule()
+    {
+        Console.WriteLine();
+        WriteLine("  " + new string('─', 52), ConsoleColor.DarkGray);
     }
 
     public static void Section(string title)

@@ -8,6 +8,7 @@ internal static class Features
     public const string Coins = "coins";
     public const string Radio = "radio";
     public const string Chat = "chat";
+    public const string Updates = "updates";
 
     public static IReadOnlyList<string> All { get; } = [Ads, Promotions, Store, Coins, Radio, Chat];
 }

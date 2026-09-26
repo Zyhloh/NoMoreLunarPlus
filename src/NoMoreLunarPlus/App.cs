@@ -23,7 +23,19 @@ internal sealed class App(PatcherConfig config, string configPath, Options optio
             pause = config.PauseOnExit && !options.NoPause;
 
             EnsureAdministrator();
-            new App(config, configPath, options).Execute();
+
+            var app = new App(config, configPath, options);
+
+            if (options.HasAction)
+            {
+                app.RunActions();
+            }
+            else
+            {
+                app.RunMenu();
+                pause = false;
+            }
+
             return 0;
         }
         catch (PatcherException exception)
@@ -45,55 +57,114 @@ internal sealed class App(PatcherConfig config, string configPath, Options optio
         }
     }
 
-    private void Execute()
+    private void RunActions()
     {
         var install = ResolveInstall();
         var backups = new BackupStore(install);
-        var marker = ReadMarker(install);
+        var state = ReadState(install);
 
-        Terminal.Field("Install", install.Directory);
-        Terminal.Field("Version", install.Version);
-        Terminal.Field("Status", marker is null ? "Stock" : $"Patched by v{marker.PatcherVersion}", marker is null ? ConsoleColor.White : ConsoleColor.Green);
+        PrintSummary(install, state);
 
-        switch (options.Action ?? ChooseAction(marker))
+        if (options.Check)
         {
-            case PatcherAction.Patch:
-                Patch(install, backups, marker is not null);
-                break;
-            case PatcherAction.Restore:
-                Restore(install, backups, marker is not null);
-                break;
-            case PatcherAction.Check:
-                Check(install, backups, marker is not null);
-                break;
+            Check(install, backups, state);
+        }
+        else if (options.Restore)
+        {
+            Restore(install, backups, state);
+        }
+        else
+        {
+            Apply(install, backups, state, new PatchState(
+                options.Patch || state.RemoveUpsells,
+                options.BlockUpdates ?? state.BlockUpdates));
         }
     }
 
-    private static PatcherAction? ChooseAction(PatchMarker? marker)
+    private void RunMenu()
     {
-        if (marker is null)
-        {
-            return PatcherAction.Patch;
-        }
+        var install = ResolveInstall();
+        var backups = new BackupStore(install);
 
-        return Terminal.Choose(
-            "This install is already patched. What do you want to do?",
-            ('R', "Re-apply patches"),
-            ('U', "Unpatch and restore the stock launcher"),
-            ('Q', "Quit")) switch
+        while (true)
         {
-            'R' => PatcherAction.Patch,
-            'U' => PatcherAction.Restore,
-            _ => null
+            var state = ReadState(install);
+            PrintSummary(install, state);
+
+            var action = ChooseFromMenu(install, backups, state);
+
+            if (action is null)
+            {
+                return;
+            }
+
+            try
+            {
+                action();
+            }
+            catch (PatcherException exception)
+            {
+                Terminal.Error(exception.Message);
+            }
+
+            Terminal.Rule();
+        }
+    }
+
+    private Action? ChooseFromMenu(LunarInstall install, BackupStore backups, PatchState state)
+    {
+        var entries = new List<(string Label, Action Run)>
+        {
+            (state.RemoveUpsells ? "Re-apply ad and upsell removal" : "Remove ads and upsells",
+                () => Apply(install, backups, state, state with { RemoveUpsells = true })),
+            (state.BlockUpdates ? "Allow launcher updates" : "Block launcher updates",
+                () => ToggleUpdates(install, backups, state))
         };
+
+        if (state.IsPatched)
+        {
+            entries.Add(("Restore stock launcher", () => Restore(install, backups, state)));
+        }
+
+        entries.Add(("Dry run (show which patches match)", () => Check(install, backups, state)));
+
+        var choices = entries
+            .Select((entry, index) => ((char)('1' + index), entry.Label))
+            .Append(('Q', "Quit"))
+            .ToArray();
+
+        var key = Terminal.Choose("What do you want to do?", choices);
+        return key == 'Q' ? null : entries[key - '1'].Run;
     }
 
-    private void Patch(LunarInstall install, BackupStore backups, bool isPatched)
+    private void ToggleUpdates(LunarInstall install, BackupStore backups, PatchState state)
     {
+        if (!state.BlockUpdates)
+        {
+            Terminal.Warning("Lunar Client will stop updating itself until you choose \"Allow launcher updates\".");
+            Terminal.Warning("Game versions, mods and assets still update normally.");
+
+            if (Terminal.Choose("Continue?", ('Y', "Yes"), ('N', "No")) != 'Y')
+            {
+                return;
+            }
+        }
+
+        Apply(install, backups, state, state with { BlockUpdates = !state.BlockUpdates });
+    }
+
+    private void Apply(LunarInstall install, BackupStore backups, PatchState current, PatchState desired)
+    {
+        if (!desired.IsPatched)
+        {
+            Restore(install, backups, current);
+            return;
+        }
+
         Terminal.Section("Patching");
         CloseLunar(install);
 
-        if (isPatched)
+        if (current.IsPatched)
         {
             backups.EnsureUsable();
         }
@@ -107,16 +178,37 @@ internal sealed class App(PatcherConfig config, string configPath, Options optio
         using var archive = AsarArchive.Open(backups.AsarPath);
 
         Terminal.Step("Applying patches");
-        var run = PatchEngine.Run(archive, EnabledPatches());
+        var run = PatchEngine.Run(archive, SelectPatches(desired));
         Terminal.Done($"{run.AppliedCount} applied");
 
         PrintResults(run);
+
+        if (desired.BlockUpdates && !run.Results.Any(result => result.Patch.Id == PatchCatalog.BlockUpdatesId && result.Outcome == PatchOutcome.Applied))
+        {
+            throw new PatcherException("Update blocking isn't supported on this Lunar Client version. Nothing was changed.");
+        }
 
         if (run.AppliedCount == 0)
         {
             throw new PatcherException("None of the patches matched this Lunar Client version. Nothing was changed.");
         }
 
+        Install(install, backups, archive, run);
+
+        Terminal.Success($"Lunar Client is patched ({run.AppliedCount}/{run.Results.Count}). Launch it like normal.");
+
+        if (desired.BlockUpdates)
+        {
+            Terminal.Warning("Launcher updates are blocked. Choose \"Allow launcher updates\" when you want to update.");
+        }
+        else
+        {
+            Terminal.Warning("Run this again after Lunar Client updates, since updates replace the patched files.");
+        }
+    }
+
+    private static void Install(LunarInstall install, BackupStore backups, AsarArchive archive, PatchRun run)
+    {
         var files = new Dictionary<string, byte[]>(run.ModifiedFiles, StringComparer.Ordinal)
         {
             [PatchMarker.EntryPath] = PatchMarker.Create(install.Version, run).ToBytes()
@@ -144,14 +236,11 @@ internal sealed class App(PatcherConfig config, string configPath, Options optio
             FileSwap.DeleteQuietly(stagedAsar);
             FileSwap.DeleteQuietly(stagedExe);
         }
-
-        Terminal.Success($"Lunar Client is patched ({run.AppliedCount}/{run.Results.Count}). Launch it like normal.");
-        Terminal.Warning("Run this again after Lunar Client updates, since updates replace the patched files.");
     }
 
-    private static void Restore(LunarInstall install, BackupStore backups, bool isPatched)
+    private static void Restore(LunarInstall install, BackupStore backups, PatchState state)
     {
-        if (!isPatched)
+        if (!state.IsPatched)
         {
             Terminal.Success("This install is already stock. Nothing to restore.");
             return;
@@ -169,26 +258,39 @@ internal sealed class App(PatcherConfig config, string configPath, Options optio
         Terminal.Success("Lunar Client has been restored to stock.");
     }
 
-    private void Check(LunarInstall install, BackupStore backups, bool isPatched)
+    private void Check(LunarInstall install, BackupStore backups, PatchState state)
     {
-        if (isPatched)
+        if (state.IsPatched)
         {
             backups.EnsureUsable();
         }
 
-        using var archive = AsarArchive.Open(isPatched ? backups.AsarPath : install.AsarPath);
+        using var archive = AsarArchive.Open(state.IsPatched ? backups.AsarPath : install.AsarPath);
 
         Terminal.Section("Dry run");
         Terminal.Step("Matching patches");
-        var run = PatchEngine.Run(archive, EnabledPatches());
+        var run = PatchEngine.Run(archive, SelectPatches(new PatchState(true, true)));
         Terminal.Done($"{run.AppliedCount} would apply");
 
         PrintResults(run);
         Terminal.Success("Dry run finished. No files were changed.");
     }
 
-    private IEnumerable<PatchDefinition> EnabledPatches() =>
-        PatchCatalog.All.Where(patch => config.IsEnabled(patch.Feature));
+    private IEnumerable<PatchDefinition> SelectPatches(PatchState state)
+    {
+        if (state.RemoveUpsells)
+        {
+            foreach (var patch in PatchCatalog.Removals.Where(patch => config.IsEnabled(patch.Feature)))
+            {
+                yield return patch;
+            }
+        }
+
+        if (state.BlockUpdates)
+        {
+            yield return PatchCatalog.BlockUpdates;
+        }
+    }
 
     private LunarInstall ResolveInstall()
     {
@@ -239,7 +341,6 @@ internal sealed class App(PatcherConfig config, string configPath, Options optio
                 config.InstallPath = install.Directory;
                 config.Save(configPath);
                 Terminal.Note("  Saved to config.json for next time.");
-                Console.WriteLine();
                 return install;
             }
 
@@ -247,10 +348,19 @@ internal sealed class App(PatcherConfig config, string configPath, Options optio
         }
     }
 
-    private static PatchMarker? ReadMarker(LunarInstall install)
+    private static PatchState ReadState(LunarInstall install)
     {
         using var archive = AsarArchive.Open(install.AsarPath);
-        return PatchMarker.Read(archive);
+        return PatchState.From(PatchMarker.Read(archive));
+    }
+
+    private static void PrintSummary(LunarInstall install, PatchState state)
+    {
+        Console.WriteLine();
+        Terminal.Field("Install", install.Directory);
+        Terminal.Field("Version", install.Version);
+        Terminal.Field("Ads", state.RemoveUpsells ? "Removed" : "Stock", state.RemoveUpsells ? ConsoleColor.Green : ConsoleColor.White);
+        Terminal.Field("Updates", state.BlockUpdates ? "Blocked" : "Allowed", state.BlockUpdates ? ConsoleColor.Yellow : ConsoleColor.White);
     }
 
     private static void CloseLunar(LunarInstall install)
@@ -268,8 +378,6 @@ internal sealed class App(PatcherConfig config, string configPath, Options optio
         {
             Terminal.Result(result);
         }
-
-        Console.WriteLine();
     }
 
     private static void EnsureAdministrator()
