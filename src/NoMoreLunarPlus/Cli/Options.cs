@@ -2,6 +2,7 @@ namespace NoMoreLunarPlus.Cli;
 
 internal sealed record Options(
     bool Patch,
+    bool? RemoveTelemetry,
     bool? BlockUpdates,
     bool Restore,
     bool Check,
@@ -9,13 +10,14 @@ internal sealed record Options(
     bool NoPause)
 {
     public const string Usage =
-        "Usage: NoMoreLunarPlus [--patch] [--block-updates | --allow-updates] [--restore] [--check] [--path <folder>] [--no-pause]";
+        "Usage: NoMoreLunarPlus [--patch] [--remove-telemetry | --keep-telemetry] [--block-updates | --allow-updates] [--restore] [--check] [--path <folder>] [--no-pause]";
 
-    public bool HasAction => Patch || BlockUpdates.HasValue || Restore || Check;
+    public bool HasAction => Patch || RemoveTelemetry.HasValue || BlockUpdates.HasValue || Restore || Check;
 
     public static Options Parse(string[] args)
     {
         var patch = false;
+        bool? removeTelemetry = null;
         bool? blockUpdates = null;
         var restore = false;
         var check = false;
@@ -28,6 +30,12 @@ internal sealed record Options(
             {
                 case "--patch":
                     patch = true;
+                    break;
+                case "--remove-telemetry":
+                    removeTelemetry = true;
+                    break;
+                case "--keep-telemetry":
+                    removeTelemetry = false;
                     break;
                 case "--block-updates":
                     blockUpdates = true;
@@ -52,11 +60,13 @@ internal sealed record Options(
             }
         }
 
-        if ((restore || check) && (patch || blockUpdates.HasValue) || restore && check)
+        var changesPatches = patch || removeTelemetry.HasValue || blockUpdates.HasValue;
+
+        if ((restore || check) && changesPatches || restore && check)
         {
             throw new PatcherException($"--restore and --check can't be combined with other actions. {Usage}");
         }
 
-        return new Options(patch, blockUpdates, restore, check, installPath, noPause);
+        return new Options(patch, removeTelemetry, blockUpdates, restore, check, installPath, noPause);
     }
 }

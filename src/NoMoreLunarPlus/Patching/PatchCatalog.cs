@@ -12,7 +12,40 @@ internal static class PatchCatalog
             """let (?<result>[\w$]+)=await (?<updater>[\w$]+)\.autoUpdater\.checkForUpdates\(\);""",
             "let ${result}=(${updater}.autoUpdater.emit(`update-not-available`),null);");
 
-    public static IReadOnlyList<PatchDefinition> All => [.. Removals, BlockUpdates];
+    public static IReadOnlyList<PatchDefinition> All => [.. Removals, .. Telemetry, BlockUpdates];
+
+    public static IReadOnlyList<PatchDefinition> Telemetry { get; } =
+    [
+        new("analytics-events", "Launcher analytics events", Features.Telemetry, PatchScope.Main,
+            """(?<![\w$])(?<head>sendEvent=async\([\w$,]*\)=>\{)(?=if\(![\w$]+\.get\(`allow-analytics-collection`\))""",
+            "${head}return;"),
+
+        new("analytics-upload", "Queued and offline analytics uploads", Features.Telemetry, PatchScope.Main,
+            """(?<head>async sendEventsWithRetry\([\w$]+\)\{)""",
+            "${head}return;"),
+
+        new("sentry", "Sentry error and performance tracking", Features.Telemetry, PatchScope.Any,
+            """https://[0-9a-f]+@o\d+\.ingest(?:\.[a-z]+)?\.sentry\.io/\d+""",
+            "",
+            maxMatches: 6),
+
+        new("email-hashes", "Account email hashing for Overwolf", Features.Telemetry, PatchScope.Main,
+            """(?<![\w$])(?<head>setEmailHashes\([\w$]+,[\w$]+\)\{)""",
+            "${head}return;"),
+
+        new("email-hash-registry", "Email hashes in Overwolf registry", Features.Telemetry, PatchScope.Main,
+            """(?<![\w$])(?<head>setRegistryEmailHashes\([\w$]+,[\w$]+,[\w$]+,[\w$]+\)\{)""",
+            "${head}this.clearRegistryEmailHashes();return;"),
+
+        new("email-hash-cache", "Cached email hashes", Features.Telemetry, PatchScope.Main,
+            """getCachedOWAEH\(\)\{return this\.store\.get\(`owaeh`,\{\}\)\}""",
+            "getCachedOWAEH(){return this.store.delete(`owaeh`),{}}"),
+
+        new("auto-log-upload", "Automatic crash log uploads", Features.Telemetry, PatchScope.Renderer,
+            """(?<![\w$])[\w$]+\([\w$]+=>[\w$]+\.settings\.options\[`auto-upload-logs`\]\)""",
+            "!1",
+            maxMatches: 4)
+    ];
 
     public static IReadOnlyList<PatchDefinition> Removals { get; } =
     [

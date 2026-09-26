@@ -77,6 +77,7 @@ internal sealed class App(PatcherConfig config, string configPath, Options optio
         {
             Apply(install, backups, state, new PatchState(
                 options.Patch || state.RemoveUpsells,
+                options.RemoveTelemetry ?? state.RemoveTelemetry,
                 options.BlockUpdates ?? state.BlockUpdates));
         }
     }
@@ -117,6 +118,8 @@ internal sealed class App(PatcherConfig config, string configPath, Options optio
         {
             (state.RemoveUpsells ? "Re-apply ad and upsell removal" : "Remove ads and upsells",
                 () => Apply(install, backups, state, state with { RemoveUpsells = true })),
+            (state.RemoveTelemetry ? "Restore telemetry and tracking" : "Remove telemetry and tracking",
+                () => Apply(install, backups, state, state with { RemoveTelemetry = !state.RemoveTelemetry })),
             (state.BlockUpdates ? "Allow launcher updates" : "Block launcher updates",
                 () => ToggleUpdates(install, backups, state))
         };
@@ -183,9 +186,14 @@ internal sealed class App(PatcherConfig config, string configPath, Options optio
 
         PrintResults(run);
 
-        if (desired.BlockUpdates && !run.Results.Any(result => result.Patch.Id == PatchCatalog.BlockUpdatesId && result.Outcome == PatchOutcome.Applied))
+        if (desired.BlockUpdates && !AnyApplied(run, [PatchCatalog.BlockUpdates]))
         {
             throw new PatcherException("Update blocking isn't supported on this Lunar Client version. Nothing was changed.");
+        }
+
+        if (desired.RemoveTelemetry && !AnyApplied(run, PatchCatalog.Telemetry))
+        {
+            throw new PatcherException("Telemetry removal isn't supported on this Lunar Client version. Nothing was changed.");
         }
 
         if (run.AppliedCount == 0)
@@ -269,7 +277,7 @@ internal sealed class App(PatcherConfig config, string configPath, Options optio
 
         Terminal.Section("Dry run");
         Terminal.Step("Matching patches");
-        var run = PatchEngine.Run(archive, SelectPatches(new PatchState(true, true)));
+        var run = PatchEngine.Run(archive, SelectPatches(new PatchState(true, true, true)));
         Terminal.Done($"{run.AppliedCount} would apply");
 
         PrintResults(run);
@@ -286,11 +294,22 @@ internal sealed class App(PatcherConfig config, string configPath, Options optio
             }
         }
 
+        if (state.RemoveTelemetry)
+        {
+            foreach (var patch in PatchCatalog.Telemetry)
+            {
+                yield return patch;
+            }
+        }
+
         if (state.BlockUpdates)
         {
             yield return PatchCatalog.BlockUpdates;
         }
     }
+
+    private static bool AnyApplied(PatchRun run, IReadOnlyList<PatchDefinition> patches) =>
+        run.Results.Any(result => result.Outcome == PatchOutcome.Applied && patches.Contains(result.Patch));
 
     private LunarInstall ResolveInstall()
     {
@@ -360,6 +379,7 @@ internal sealed class App(PatcherConfig config, string configPath, Options optio
         Terminal.Field("Install", install.Directory);
         Terminal.Field("Version", install.Version);
         Terminal.Field("Ads", state.RemoveUpsells ? "Removed" : "Stock", state.RemoveUpsells ? ConsoleColor.Green : ConsoleColor.White);
+        Terminal.Field("Tracking", state.RemoveTelemetry ? "Removed" : "Stock", state.RemoveTelemetry ? ConsoleColor.Green : ConsoleColor.White);
         Terminal.Field("Updates", state.BlockUpdates ? "Blocked" : "Allowed", state.BlockUpdates ? ConsoleColor.Yellow : ConsoleColor.White);
     }
 

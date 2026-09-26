@@ -19,7 +19,10 @@ It patches your local launcher install in place, keeps a backup of the original 
 
 Everything else in the launcher works as normal. Each group can be turned off individually in `config.json`.
 
-It can also optionally [block the launcher from updating itself](#blocking-launcher-updates), so the patches aren't undone by the next update.
+Two optional extras are available from the menu:
+
+- [Remove telemetry and tracking](#removing-telemetry-and-tracking): stops the launcher's analytics, error tracking and email hashing.
+- [Block launcher updates](#blocking-launcher-updates): stops the launcher updating itself, so the patches aren't undone by the next update.
 
 ## How it works
 
@@ -61,16 +64,33 @@ Run `NoMoreLunarPlus.exe` as administrator. It finds your install, shows its cur
   Install   C:\Users\you\AppData\Local\Programs\Lunar Client
   Version   3.7.21.0
   Ads       Stock
+  Tracking  Stock
   Updates   Allowed
 
   What do you want to do?
     [1] Remove ads and upsells
-    [2] Block launcher updates
-    [3] Dry run (show which patches match)
+    [2] Remove telemetry and tracking
+    [3] Block launcher updates
+    [4] Dry run (show which patches match)
     [Q] Quit
 ```
 
-Every action closes Lunar Client first, then shows the result of each patch. The two options are independent, so you can remove ads, block updates, or both.
+Every action closes Lunar Client first, then shows the result of each patch. The options are independent, so you can use any combination of them. Once something is applied, the menu offers to undo it, along with a full restore to stock.
+
+### Removing telemetry and tracking
+
+This is optional and off by default. It removes:
+
+| What | Details |
+| --- | --- |
+| Launcher analytics | Every analytics event the launcher sends, including the startup event with your hardware, system language, uptime, installed settings and download attribution IDs, plus page views, clicks, installs and launches. Queued and offline cached events are never sent either. |
+| Sentry | Error, crash and performance reporting from both the launcher and its UI, including crash minidumps. |
+| Email hashing | The launcher hashes your Microsoft account email (SHA1, SHA256, MD5) and hands the hashes to Overwolf for ad targeting. This is stopped, hashes already in the Overwolf registry are cleared on your next sign in, and cached hashes are deleted. |
+| Automatic log uploads | Game and launcher logs are no longer uploaded automatically after a crash. The manual upload button still works if you want to send logs to support. |
+
+Also note that any patch at all causes Overwolf's package manager to stop loading, which includes its own analytics service.
+
+Things this does not change: requests the launcher needs in order to work (signing in, game downloads, friends, cosmetics and so on) still go to Lunar Client's servers as normal, along with the identifiers those requests carry. Minecraft's own telemetry is not affected.
 
 ### Blocking launcher updates
 
@@ -87,6 +107,8 @@ Passing any action skips the menu, which is useful for scripts.
 | Option | Description |
 | --- | --- |
 | `--patch` | Remove ads and upsells (re-applies if already patched) |
+| `--remove-telemetry` | Remove telemetry and tracking |
+| `--keep-telemetry` | Put telemetry back to stock |
 | `--block-updates` | Block launcher self-updates |
 | `--allow-updates` | Allow launcher self-updates again |
 | `--restore` | Restore the stock launcher from the backup |
@@ -94,7 +116,7 @@ Passing any action skips the menu, which is useful for scripts.
 | `--path <folder>` | Use a specific Lunar Client install folder |
 | `--no-pause` | Don't wait for a key press before exiting |
 
-`--patch` can be combined with `--block-updates` or `--allow-updates`.
+`--patch`, the telemetry options and the update options can be combined, for example `--patch --remove-telemetry --block-updates`.
 
 ### config.json
 
